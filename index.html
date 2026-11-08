@@ -64,7 +64,16 @@ button { font: inherit; cursor: pointer; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .row.between { justify-content: space-between; }
 
-/* home */
+/* home: groups left, test history right (stacks below on narrow screens) */
+.wrap.wide { max-width: 1120px; display: block; }
+.homegrid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 48px; align-items: start; }
+.homeleft { display: grid; gap: 20px; min-width: 0; }
+.homeaside { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; min-width: 0; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+@media (max-width: 900px) {
+  .homegrid { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .homeaside { position: static; max-height: none; }
+}
+/* home list */
 .totals { display: flex; flex-wrap: wrap; gap: 6px 20px; font-family: var(--font-mono); font-size: 0.82rem; color: var(--muted); }
 .totals b { color: var(--ink); font-weight: 500; }
 .groups { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
@@ -323,7 +332,7 @@ function el(tag, cls, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
-function clear() { app.textContent = ""; window.scrollTo(0, 0); }
+function clear() { app.textContent = ""; app.classList.remove("wide"); window.scrollTo(0, 0); }
 var LABEL = { ok: "Vollständig", mid: "Teilweise", bad: "Noch offen", none: "Nicht beantwortet" };
 function counts(g) {
   var c = { ok: 0, mid: 0, bad: 0, none: 0 };
@@ -378,7 +387,6 @@ function renderHome() {
     list.append(li);
   });
   app.append(list);
-  renderHistory(app);
 
   var foot = el("div", "row");
   var reset = el("button", "btn ghost", "Fortschritt zurücksetzen");
@@ -389,6 +397,16 @@ function renderHome() {
   };
   foot.append(reset);
   app.append(foot);
+
+  /* Zweispaltig: links Gruppen, rechts Verlauf */
+  var left = el("div", "homeleft");
+  Array.from(app.children).forEach(function (n) { left.append(n); });
+  var aside = el("aside", "homeaside");
+  renderHistory(aside, true);
+  var grid = el("div", "homegrid");
+  grid.append(left, aside);
+  app.classList.add("wide");
+  app.append(grid);
 }
 
 /* ---------- Durchgang ---------- */
@@ -438,11 +456,33 @@ function renderName(g, onlyOpen) {
 }
 
 /* Verlauf aller abgeschlossenen Tests */
-function renderHistory(container) {
+function renderHistory(container, compact) {
   var box = el("section"); box.style.display = "grid"; box.style.gap = "12px";
   box.append(el("h2", null, "Verlauf"));
   if (!history_.length) {
     box.append(el("p", "lead", "Noch kein Test abgeschlossen. Nach jedem Test erscheint hier eine Zeile mit Name, Datum, Uhrzeit und Ergebnis."));
+    container.append(box); return;
+  }
+  if (compact) {
+    var lst = el("ol"); lst.style.cssText = "list-style:none;margin:0;padding:0;border-top:1px solid var(--line)";
+    history_.slice().reverse().forEach(function (h) {
+      var li = el("li"); li.style.cssText = "display:grid;gap:2px;padding:12px 0;border-bottom:1px solid var(--line)";
+      var l1 = el("div"); l1.style.cssText = "display:flex;justify-content:space-between;gap:12px;align-items:baseline";
+      var nm = el("span", null, h.name); nm.style.cssText = "font-weight:600;overflow-wrap:anywhere;min-width:0";
+      var sc = el("span", null, fmtPts(h.points) + "/" + h.total + " · " + h.percent + " %"); sc.style.cssText = "font-family:var(--font-mono);font-size:0.82rem;white-space:nowrap;font-variant-numeric:tabular-nums";
+      l1.append(nm, sc);
+      var l2 = el("div", "hint", fmtDate(h.date));
+      var l3 = el("div", "hint", h.group);
+      li.append(l1, l2, l3); lst.append(li);
+    });
+    box.append(lst);
+    box.append(el("p", "hint", "Punkte: vollständig = 1, teilweise = 0,5, offen = 0. Gespeichert nur in diesem Browser."));
+    var clr2 = el("button", "btn ghost", "Verlauf löschen"), armed2 = false;
+    clr2.onclick = function () {
+      if (!armed2) { armed2 = true; clr2.textContent = "Wirklich löschen? Nochmal tippen."; return; }
+      history_ = []; saveHistory(); renderHome();
+    };
+    var r2 = el("div", "row"); r2.append(clr2); box.append(r2);
     container.append(box); return;
   }
   var wrap = el("div"); wrap.style.overflowX = "auto";
