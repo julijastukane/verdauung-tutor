@@ -448,70 +448,87 @@ function renderName(g, onlyOpen) {
     if (!name) { err.textContent = "Bitte gib deinen Namen ein."; err.hidden = false; inp.focus(); return; }
     try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
     var queue = onlyOpen ? g.qs.filter(function (q) { return progress[q.n] !== "ok"; }) : g.qs.slice();
-    session = { group: g, queue: queue, i: 0, results: {}, name: name, started: new Date().toISOString(), saved: false };
+    session = { group: g, queue: queue, i: 0, results: {}, name: name, started: new Date().toISOString(), saved: false, log: [] };
     renderQuestion();
   });
   app.append(form);
   setTimeout(function () { inp.focus(); }, 0);
 }
 
-/* Verlauf aller abgeschlossenen Tests */
+/* Verlauf: jeder Test (auch abgebrochene) mit allen Antworten */
+function recordAttempt(done) {
+  var s = session;
+  if (!s || s.saved || !s.log.length) return;
+  s.saved = true;
+  var ok = 0, mid = 0;
+  s.queue.forEach(function (q) { var v = s.results[q.n]; if (v === "ok") ok++; else if (v === "mid") mid++; });
+  var pts = ok + mid * 0.5, total = s.queue.length;
+  history_.push({
+    name: s.name, date: new Date().toISOString(), started: s.started, group: s.group.title,
+    points: pts, total: total, percent: total ? Math.round(pts / total * 100) : 0,
+    done: !!done, answered: s.log.length, details: s.log
+  });
+  saveHistory();
+}
+function leaveSession() { recordAttempt(false); renderHome(); }
+
+var VLABEL = { ok: "vollständig", mid: "teilweise", bad: "offen" };
 function renderHistory(container, compact) {
   var box = el("section"); box.style.display = "grid"; box.style.gap = "12px";
   box.append(el("h2", null, "Verlauf"));
   if (!history_.length) {
-    box.append(el("p", "lead", "Noch kein Test abgeschlossen. Nach jedem Test erscheint hier eine Zeile mit Name, Datum, Uhrzeit und Ergebnis."));
+    box.append(el("p", "lead", "Noch kein Test gemacht. Jeder Test erscheint hier mit Name, Datum, Uhrzeit, Ergebnis und allen Antworten."));
     container.append(box); return;
   }
-  if (compact) {
-    var lst = el("ol"); lst.style.cssText = "list-style:none;margin:0;padding:0;border-top:1px solid var(--line)";
-    history_.slice().reverse().forEach(function (h) {
-      var li = el("li"); li.style.cssText = "display:grid;gap:2px;padding:12px 0;border-bottom:1px solid var(--line)";
-      var l1 = el("div"); l1.style.cssText = "display:flex;justify-content:space-between;gap:12px;align-items:baseline";
-      var nm = el("span", null, h.name); nm.style.cssText = "font-weight:600;overflow-wrap:anywhere;min-width:0";
-      var sc = el("span", null, fmtPts(h.points) + "/" + h.total + " · " + h.percent + " %"); sc.style.cssText = "font-family:var(--font-mono);font-size:0.82rem;white-space:nowrap;font-variant-numeric:tabular-nums";
-      l1.append(nm, sc);
-      var l2 = el("div", "hint", fmtDate(h.date));
-      var l3 = el("div", "hint", h.group);
-      li.append(l1, l2, l3); lst.append(li);
-    });
-    box.append(lst);
-    box.append(el("p", "hint", "Punkte: vollständig = 1, teilweise = 0,5, offen = 0. Gespeichert nur in diesem Browser."));
-    var clr2 = el("button", "btn ghost", "Verlauf löschen"), armed2 = false;
-    clr2.onclick = function () {
-      if (!armed2) { armed2 = true; clr2.textContent = "Wirklich löschen? Nochmal tippen."; return; }
-      history_ = []; saveHistory(); renderHome();
-    };
-    var r2 = el("div", "row"); r2.append(clr2); box.append(r2);
-    container.append(box); return;
-  }
-  var wrap = el("div"); wrap.style.overflowX = "auto";
-  var tbl = el("table"); tbl.style.cssText = "width:100%;border-collapse:collapse;font-size:0.9rem;min-width:520px";
-  var thead = el("thead"), hr = el("tr");
-  ["Name", "Datum und Uhrzeit", "Gruppe", "Ergebnis"].forEach(function (h) {
-    var th = el("th", null, h); th.style.cssText = "text-align:left;font-family:var(--font-mono);font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);font-weight:500;padding:8px 10px 8px 0;border-bottom:1px solid var(--line)";
-    hr.append(th);
-  });
-  thead.append(hr); tbl.append(thead);
-  var tb = el("tbody");
+  box.append(el("p", "hint", history_.length + (history_.length === 1 ? " Test" : " Tests") + " gespeichert. Tippe auf einen Eintrag, um alle Antworten zu sehen."));
+  var lst = el("ol"); lst.style.cssText = "list-style:none;margin:0;padding:0;border-top:1px solid var(--line)";
   history_.slice().reverse().forEach(function (h) {
-    var tr = el("tr");
-    var res = fmtPts(h.points) + " von " + h.total + " Punkten (" + h.percent + " %)";
-    [h.name, fmtDate(h.date), h.group, res].forEach(function (t, i) {
-      var td = el("td", null, t);
-      td.style.cssText = "padding:10px 10px 10px 0;border-bottom:1px solid var(--line);vertical-align:top" + (i === 3 ? ";font-variant-numeric:tabular-nums;white-space:nowrap" : "");
-      tr.append(td);
-    });
-    tb.append(tr);
+    var li = el("li"); li.style.cssText = "border-bottom:1px solid var(--line)";
+    var d = document.createElement("details");
+    var sm = document.createElement("summary");
+    sm.style.cssText = "cursor:pointer;display:grid;gap:2px;padding:12px 0;list-style:revert";
+    var l1 = el("div"); l1.style.cssText = "display:flex;justify-content:space-between;gap:12px;align-items:baseline";
+    var nm = el("span", null, h.name); nm.style.cssText = "font-weight:600;overflow-wrap:anywhere;min-width:0";
+    var sc = el("span", null, fmtPts(h.points) + "/" + h.total + " · " + h.percent + " %"); sc.style.cssText = "font-family:var(--font-mono);font-size:0.82rem;white-space:nowrap;font-variant-numeric:tabular-nums";
+    l1.append(nm, sc);
+    var status = h.done === false ? " · abgebrochen nach " + h.answered + " von " + h.total + " Fragen" : "";
+    sm.append(l1, el("div", "hint", fmtDate(h.date) + status), el("div", "hint", h.group));
+    d.append(sm);
+    var det = Array.isArray(h.details) ? h.details : [];
+    if (det.length) {
+      var ul = el("ul"); ul.style.cssText = "list-style:none;margin:0 0 12px;padding:0;display:grid;gap:10px";
+      det.forEach(function (x) {
+        var it = el("li"); it.style.cssText = "display:grid;gap:2px;padding-left:10px;border-left:3px solid var(--" + (x.verdict || "bad") + ")";
+        var t = el("div", "hint", "Nr. " + x.n + " · " + (x.verdict ? VLABEL[x.verdict] : "") + " · " + fmtDate(x.at));
+        var q = el("div", null, x.q || ""); q.style.cssText = "font-size:0.9rem;font-weight:500;overflow-wrap:anywhere";
+        var a = el("div", "hint", "Antwort: " + (x.answer || "(keine)")); a.style.cssText += ";white-space:pre-wrap;overflow-wrap:anywhere";
+        it.append(t, q, a); ul.append(it);
+      });
+      d.append(ul);
+    }
+    li.append(d); lst.append(li);
   });
-  tbl.append(tb); wrap.append(tbl); box.append(wrap);
-  box.append(el("p", "hint", "Punkte: vollständige Antwort = 1, teilweise richtig = 0,5, offen = 0. Der Verlauf wird nur in diesem Browser gespeichert."));
+  box.append(lst);
+  box.append(el("p", "hint", "Punkte: vollständig = 1, teilweise = 0,5, offen = 0. Gespeichert nur in diesem Browser."));
+
+  var row = el("div", "row");
+  var cp = el("button", "btn", "Verlauf kopieren");
+  cp.onclick = function () {
+    var lines = ["Name;Datum;Gruppe;Punkte;Fragen;Prozent;Status"];
+    history_.forEach(function (h) {
+      lines.push([h.name, fmtDate(h.date), h.group, fmtPts(h.points), h.total, h.percent, h.done === false ? "abgebrochen" : "abgeschlossen"].join(";"));
+    });
+    var txt = lines.join("\n");
+    var ok = function () { cp.textContent = "Kopiert"; };
+    try { navigator.clipboard.writeText(txt).then(ok, function () { cp.textContent = "Kopieren nicht möglich"; }); }
+    catch (e) { cp.textContent = "Kopieren nicht möglich"; }
+  };
   var clr = el("button", "btn ghost", "Verlauf löschen"), armed = false;
   clr.onclick = function () {
-    if (!armed) { armed = true; clr.textContent = "Wirklich löschen? Nochmal tippen."; return; }
+    if (!armed) { armed = true; clr.textContent = "Wirklich alles löschen? Nochmal tippen."; return; }
     history_ = []; saveHistory(); renderHome();
   };
-  var r = el("div", "row"); r.append(clr); box.append(r);
+  row.append(cp, clr); box.append(row);
   container.append(box);
 }
 
@@ -524,7 +541,7 @@ function renderQuestion() {
   var top = el("div", "topline");
   var r = el("div", "row between");
   var back = el("button", "btn ghost", "← Gruppen");
-  back.onclick = renderHome;
+  back.onclick = leaveSession;
   r.append(back, el("div", "eyebrow", g.title));
   top.append(r);
   var pr = el("div", "progress"); var pi = el("i"); pi.style.width = (s.i / s.queue.length * 100) + "%"; pr.append(pi);
@@ -543,8 +560,9 @@ function renderQuestion() {
   if (q.mc) buildMC(q, work, fb); else buildText(q, work, fb);
 }
 
-function finish(q, verdict) {
+function finish(q, verdict, answer) {
   progress[q.n] = verdict; session.results[q.n] = verdict; save();
+  session.log.push({ n: q.n, q: q.q, verdict: verdict, answer: String(answer || "").slice(0, 1500), at: new Date().toISOString() });
 }
 function nextButton(fb) {
   var s = session;
@@ -585,7 +603,7 @@ function buildMC(q, work, fb) {
       b.disabled = true; b.classList.remove("sel");
       if (j === correctIdx) b.classList.add("right"); else if (j === picked) b.classList.add("wrong");
     });
-    finish(q, right ? "ok" : "bad");
+    finish(q, right ? "ok" : "bad", picked >= 0 ? letters[picked] + ") " + order[picked].t : "");
     var box = el("div", "tutor " + (right ? "ok" : "bad"));
     box.append(el("div", "pill", right ? "Richtig" : "Nicht richtig"));
     if (!right) box.append(el("p", null, "Richtig ist " + letters[correctIdx] + ")."));
@@ -615,7 +633,7 @@ function buildText(q, work, fb) {
 
   skip.onclick = function () {
     if (busy) return;
-    lock(); finish(q, "bad");
+    lock(); finish(q, "bad", "(weiss ich nicht)");
     var box = el("div", "tutor bad");
     box.append(el("div", "pill", "Noch offen"));
     box.append(el("h3", null, "Musterantwort"));
@@ -633,7 +651,7 @@ function buildText(q, work, fb) {
     [["ok", "Vollständig"], ["mid", "Teilweise"], ["bad", "Noch offen"]].forEach(function (p) {
       var b = el("button", "btn", p[1]);
       b.onclick = function () {
-        finish(q, p[0]);
+        finish(q, p[0], ta.value);
         r.querySelectorAll("button").forEach(function (x) { x.disabled = true; });
         nextButton(fb);
       };
@@ -667,7 +685,7 @@ function buildText(q, work, fb) {
     sampleFn.json(prompt, { modelTier: "default", effort: "low", signal: ctl.signal, cache: false }).then(function (res) {
       fb.textContent = ""; busy = false;
       var v = res && res.urteil === "vollstaendig" ? "ok" : (res && res.urteil === "teilweise" ? "mid" : "bad");
-      finish(q, v);
+      finish(q, v, text);
       var box = el("div", "tutor " + v);
       box.append(el("div", "pill", v === "ok" ? "Vollständig" : v === "mid" ? "Teilweise richtig" : "Noch nicht richtig"));
       if (res && res.gut) box.append(el("p", null, String(res.gut)));
@@ -722,11 +740,7 @@ function renderSummary() {
   app.append(ul);
 
   var pts = c.ok + c.mid * 0.5, pct = s.queue.length ? Math.round(pts / s.queue.length * 100) : 0;
-  if (!s.saved) {
-    s.saved = true;
-    history_.push({ name: s.name, date: new Date().toISOString(), group: g.title, points: pts, total: s.queue.length, percent: pct });
-    saveHistory();
-  }
+  recordAttempt(true);
   app.append(el("p", "lead", s.name + ": " + fmtPts(pts) + " von " + s.queue.length + " Punkten (" + pct + " %)."));
   var row = el("div", "row");
   if (c.mid + c.bad > 0) {
